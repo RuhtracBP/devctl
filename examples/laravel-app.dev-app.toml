@@ -1,0 +1,288 @@
+## dev-app.toml — manifest de exemplo para um projeto Laravel com
+## scripts de dev em scripts/dev/*.sh.
+##
+## Este arquivo é o CONTRATO entre o projeto host e o app de
+## ambiente de dev em Rust. Ele descreve cada ação de dev do projeto —
+## o app não sabe nada de Docker/Laravel/git worktree, só lê
+## isso e executa `script` como subprocesso.
+##
+## Convenções de schema (ver manifest-schema.md pro detalhe de cada campo):
+##   [app]              metadados do projeto host
+##   [[actions]]         uma ação = uma entrada de menu na UI
+##     id                identificador estável (não muda entre versões)
+##     label             texto exibido no menu
+##     category          agrupa ações na UI (sidebar/seções)
+##     script             caminho do script, relativo à raiz do projeto host
+##     mode               como o app deve rodar/apresentar o processo:
+##                           "instant"     roda e termina, mostra stdout até sair
+##                           "stream"      processo contínuo (ex: logs -f),
+##                                         nunca termina sozinho — cancelável
+##                           "interactive" precisa de TTY real (shell), o app
+##                                         cede o terminal por completo
+##                           "toggle"      script com subcomandos
+##                                         run/start/stop/status (background)
+##     params            inputs que o app pede ao usuário antes de rodar,
+##                       viram argv posicionais pro script na ordem declarada
+##     confirm           se true, app pede confirmação antes de rodar
+##     confirm_message   texto da confirmação (por que é perigoso)
+##     status_check      se true, aparece no painel de status com refresh
+##                       automático (além de continuar disponível como ação)
+##     notes             texto informativo mostrado na UI (ex: efeito colateral)
+##
+## params[].split_shell_words   se true, o valor digitado é dividido por
+##                              espaço em múltiplos argv (não interpola em
+##                              shell, só faz split_whitespace)
+
+[app]
+name = "laravel-app"
+description = "Laravel + MySQL/Redis via Docker Compose"
+scripts_root = "scripts/dev"
+
+# ---------------------------------------------------------------------------
+# Categoria: ciclo de vida (containers da worktree atual)
+# ---------------------------------------------------------------------------
+
+[[actions]]
+id = "up"
+label = "Subir containers"
+category = "lifecycle"
+script = "scripts/dev/up.sh"
+mode = "instant"
+notes = "No fluxo de worktree, também garante a infra compartilhada (compose de infra) antes de subir app/web."
+
+[[actions]]
+id = "down"
+label = "Derrubar containers"
+category = "lifecycle"
+script = "scripts/dev/down.sh"
+mode = "instant"
+notes = "Derruba só esta worktree (app/web). Não afeta a infra compartilhada nem outras worktrees."
+
+[[actions]]
+id = "status"
+label = "Status dos containers"
+category = "lifecycle"
+script = "scripts/dev/status.sh"
+mode = "instant"
+status_check = true
+notes = "status_check=true: aparece no painel de status com refresh automático, além de continuar disponível como ação de menu."
+
+[[actions]]
+id = "rebuild-app"
+label = "Rebuild app"
+category = "lifecycle"
+script = "scripts/dev/rebuild-app.sh"
+mode = "instant"
+notes = "docker compose build --no-cache app — pode demorar."
+
+[[actions]]
+id = "restart-app"
+label = "Reiniciar app/web"
+category = "lifecycle"
+script = "scripts/dev/restart-app.sh"
+mode = "instant"
+
+[[actions]]
+id = "logs-app"
+label = "Logs app/web"
+category = "lifecycle"
+script = "scripts/dev/logs-app.sh"
+mode = "stream"
+
+[[actions]]
+id = "shell-app"
+label = "Shell no app"
+category = "lifecycle"
+script = "scripts/dev/shell-app.sh"
+mode = "interactive"
+
+# ---------------------------------------------------------------------------
+# Categoria: dependências / build frontend
+# ---------------------------------------------------------------------------
+
+[[actions]]
+id = "composer-install"
+label = "Composer install"
+category = "dependencies"
+script = "scripts/dev/composer-install.sh"
+mode = "instant"
+
+[[actions]]
+id = "yarn-install"
+label = "Yarn install"
+category = "dependencies"
+script = "scripts/dev/yarn-install.sh"
+mode = "instant"
+
+[[actions]]
+id = "yarn-dev"
+label = "Yarn dev"
+category = "dependencies"
+script = "scripts/dev/yarn-dev.sh"
+mode = "toggle"
+toggle = { run_arg = "run", start_arg = "start", stop_arg = "stop", status_arg = "status" }
+notes = "O script já suporta start/stop/status em background — o app expõe os 4 modos."
+
+[[actions]]
+id = "npm-build"
+label = "Yarn build"
+category = "dependencies"
+script = "scripts/dev/npm-build.sh"
+mode = "instant"
+
+# ---------------------------------------------------------------------------
+# Categoria: aplicação (queue, banco, cache, testes)
+# ---------------------------------------------------------------------------
+
+[[actions]]
+id = "queue-work"
+label = "Queue worker"
+category = "app"
+script = "scripts/dev/queue-work.sh"
+mode = "toggle"
+toggle = { run_arg = "run", start_arg = "start", stop_arg = "stop", status_arg = "status" }
+notes = "Mesmo padrão do yarn-dev."
+
+[[actions]]
+id = "migrate"
+label = "Migrate"
+category = "app"
+script = "scripts/dev/migrate.sh"
+mode = "instant"
+
+[[actions]]
+id = "seed"
+label = "Seed"
+category = "app"
+script = "scripts/dev/seed.sh"
+mode = "instant"
+
+[[actions]]
+id = "cache-clear"
+label = "Cache clear"
+category = "app"
+script = "scripts/dev/cache-clear.sh"
+mode = "instant"
+
+[[actions]]
+id = "test"
+label = "Tests"
+category = "app"
+script = "scripts/dev/test.sh"
+mode = "instant"
+
+[[actions]]
+id = "artisan"
+label = "Artisan custom"
+category = "app"
+script = "scripts/dev/artisan.sh"
+mode = "instant"
+params = [
+  { name = "args", label = "Comando artisan (ex: migrate --seed)", type = "string", required = true, split_shell_words = true },
+]
+notes = "split_shell_words=true: o texto é dividido por espaço em múltiplos argv antes de rodar — artisan.sh faz `php artisan \"$@\"`, que espera um argv por token."
+
+# ---------------------------------------------------------------------------
+# Categoria: worktree (git worktree + info do ambiente atual)
+# ---------------------------------------------------------------------------
+
+[[actions]]
+id = "worktree-info"
+label = "Worktree info"
+category = "worktree"
+script = "scripts/dev/worktree-info.sh"
+mode = "instant"
+
+[[actions]]
+id = "new-worktree"
+label = "Worktree: criar nova"
+category = "worktree"
+script = "scripts/dev/new-worktree.sh"
+mode = "instant"
+long_running = true
+params = [
+  { name = "branch", label = "Nome da branch", type = "string", required = true },
+  { name = "path", label = "Caminho da worktree (vazio = default)", type = "string", required = false },
+  { name = "base_ref", label = "Branch base (só se a branch não existir)", type = "string", required = false, default = "main" },
+]
+notes = "Faz o setup completo (docker build, composer, yarn) — pode levar minutos no primeiro build. UI deve mostrar progresso, não travar sem feedback."
+
+# ---------------------------------------------------------------------------
+# Categoria: infra compartilhada (afeta TODAS as worktrees)
+# ---------------------------------------------------------------------------
+
+[[actions]]
+id = "infra-up"
+label = "Infra: subir"
+category = "infra"
+script = "scripts/dev/infra-up.sh"
+mode = "instant"
+
+[[actions]]
+id = "infra-down"
+label = "Infra: derrubar"
+category = "infra"
+script = "scripts/dev/infra-down.sh"
+mode = "instant"
+confirm = true
+confirm_message = "Derruba mysql/redis/mailpit para TODAS as worktrees que estão usando essa infra agora. Continuar?"
+
+[[actions]]
+id = "infra-status"
+label = "Infra: status"
+category = "infra"
+script = "scripts/dev/infra-status.sh"
+mode = "instant"
+status_check = true
+
+[[actions]]
+id = "infra-logs"
+label = "Infra: logs"
+category = "infra"
+script = "scripts/dev/infra-logs.sh"
+mode = "stream"
+params = [
+  { name = "service", label = "Serviço", type = "enum", options = ["mysql", "redis", "mailpit"], required = true },
+]
+
+[[actions]]
+id = "infra-restart"
+label = "Infra: restart"
+category = "infra"
+script = "scripts/dev/infra-restart.sh"
+mode = "instant"
+confirm = true
+confirm_message = "Reinicia o serviço escolhido para TODAS as worktrees. Continuar?"
+params = [
+  { name = "service", label = "Serviço", type = "enum", options = ["mysql", "redis", "mailpit"], required = true },
+]
+
+[[actions]]
+id = "infra-shell"
+label = "Infra: shell"
+category = "infra"
+script = "scripts/dev/infra-shell.sh"
+mode = "interactive"
+params = [
+  { name = "service", label = "Serviço", type = "enum", options = ["mysql", "redis", "mailpit"], required = true },
+]
+
+# ---------------------------------------------------------------------------
+# Categoria: atalhos (combinam lifecycle + infra)
+# ---------------------------------------------------------------------------
+
+[[actions]]
+id = "all-up"
+label = "Subir tudo (infra + worktree)"
+category = "shortcuts"
+script = "scripts/dev/all-up.sh"
+mode = "instant"
+
+[[actions]]
+id = "all-down"
+label = "Derrubar tudo (worktree + infra)"
+category = "shortcuts"
+script = "scripts/dev/all-down.sh"
+mode = "instant"
+confirm = true
+confirm_message = "Derruba esta worktree E a infra compartilhada (afeta outras worktrees). Continuar?"
